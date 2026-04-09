@@ -35,7 +35,7 @@ export interface SetupData {
   masterPassword: string;
   // Vercel
   vercelToken: string;
-  vercelProjectId: string;
+  vercelProjectId: string; // auto-detected from domain
   // Integrations (moved to Settings > Email)
   resendKey: string;
 }

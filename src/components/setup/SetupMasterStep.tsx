@@ -20,6 +20,19 @@ interface Props {
 
 // ── Vercel helpers ──────────────────────────────────────────
 
+async function lookupVercelProject(token: string, domain: string): Promise<{ id: string; name: string }> {
+  const res = await fetch("/api/vercel-lookup", {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ token, domain }),
+  });
+  const data = await res.json();
+  if (!res.ok || !data.success) {
+    throw new Error(data.error || "Projeto Vercel nao encontrado");
+  }
+  return data.project;
+}
+
 async function upsertVercelEnv(token: string, projectId: string, key: string, value: string) {
   const headers = { Authorization: `Bearer ${token}`, "Content-Type": "application/json" };
   const target = ["production", "preview", "development"];
@@ -168,20 +181,25 @@ export default function SetupMasterStep({ data, updateData, onNext, onBack, isIn
       // ── Salvar credenciais no browser ──
       saveExternalCredentials(data.supabaseUrl.trim(), data.supabaseAnonKey.trim());
 
-      // ── Vercel: configurar env vars + desativar installer + redeploy ──
-      if (data.vercelToken?.trim() && data.vercelProjectId?.trim()) {
+      // ── Vercel: detectar projeto + configurar env vars + redeploy ──
+      if (data.vercelToken?.trim()) {
+        setStatusMsg("🔍 Detectando projeto na Vercel...");
+        const project = await lookupVercelProject(data.vercelToken.trim(), window.location.hostname);
+        const detectedProjectId = project.id;
+        updateData({ vercelProjectId: detectedProjectId });
+
         const projectRef = new URL(data.supabaseUrl.trim()).hostname.split(".")[0];
-        setStatusMsg("⚙️ Configurando variáveis na Vercel...");
+        setStatusMsg(`⚙️ Configurando variáveis no projeto "${project.name}"...`);
         const envVars = [
           { key: "VITE_SUPABASE_URL", value: data.supabaseUrl.trim() },
           { key: "VITE_SUPABASE_PUBLISHABLE_KEY", value: data.supabaseAnonKey.trim() },
           { key: "VITE_SUPABASE_PROJECT_ID", value: projectRef },
           { key: "VITE_INSTALLER_ENABLED", value: "false" },
         ];
-        for (const env of envVars) await upsertVercelEnv(data.vercelToken.trim(), data.vercelProjectId.trim(), env.key, env.value);
+        for (const env of envVars) await upsertVercelEnv(data.vercelToken.trim(), detectedProjectId, env.key, env.value);
 
         setStatusMsg("🚀 Iniciando redeploy na Vercel...");
-        const deployId = await triggerVercelRedeploy(data.vercelToken.trim(), data.vercelProjectId.trim());
+        const deployId = await triggerVercelRedeploy(data.vercelToken.trim(), detectedProjectId);
 
         if (deployId) {
           setStatusMsg("⏳ Aguardando deploy finalizar...");
@@ -233,23 +251,20 @@ export default function SetupMasterStep({ data, updateData, onNext, onBack, isIn
         {/* Vercel */}
         <div className="space-y-4 rounded-lg border p-4">
           <h3 className="font-semibold flex items-center gap-2"><Rocket className="h-4 w-4" />Vercel — deploy automático <span className="text-xs font-normal text-muted-foreground">(opcional mas recomendado)</span></h3>
-          <div className="grid gap-3 sm:grid-cols-2">
-            <div className="space-y-2">
-              <Label>Token da Vercel</Label>
-              <Input type="password" value={data.vercelToken} onChange={(e) => updateData({ vercelToken: e.target.value })} placeholder="vcp_xxxxxxxxxxxxxxxxxxxx" />
-            </div>
-            <div className="space-y-2">
-              <Label>Project ID ou Nome</Label>
-              <Input value={data.vercelProjectId} onChange={(e) => updateData({ vercelProjectId: e.target.value })} placeholder="prj_xxx ou nome-do-projeto" />
-            </div>
+          <div className="space-y-2">
+            <Label>Token da Vercel</Label>
+            <Input type="password" value={data.vercelToken} onChange={(e) => updateData({ vercelToken: e.target.value })} placeholder="Cole seu token aqui" />
           </div>
           <div className="rounded-lg bg-muted/50 p-3 text-xs text-muted-foreground space-y-1">
-            <p>Token: <a href="https://vercel.com/account/tokens" target="_blank" rel="noopener" className="text-primary underline inline-flex items-center gap-1">vercel.com/account/tokens <ExternalLink className="h-3 w-3" /></a></p>
-            <p>Project ID: Painel Vercel → seu projeto → <strong>Settings → General</strong></p>
-            <p className="text-foreground font-medium">O que acontece ao instalar com Vercel configurada:</p>
+            <p className="font-medium text-foreground">Como obter o token:</p>
+            <p>1. Acesse <a href="https://vercel.com/account/tokens" target="_blank" rel="noopener" className="text-primary underline inline-flex items-center gap-1">vercel.com/account/tokens <ExternalLink className="h-3 w-3" /></a></p>
+            <p>2. Clique em <strong>Create</strong> → Nome: <strong>salaocrm</strong> → Scope: <strong>Full Account</strong></p>
+            <p>3. Copie o token e cole acima</p>
+            <p className="text-foreground font-medium mt-2">O que acontece ao instalar:</p>
             <ol className="list-decimal list-inside space-y-0.5">
-              <li>Variáveis de ambiente configuradas automaticamente</li>
-              <li>Wizard desativado permanentemente após o redeploy</li>
+              <li>Projeto detectado automaticamente pelo dominio</li>
+              <li>Variaveis de ambiente configuradas</li>
+              <li>Wizard desativado permanentemente apos o redeploy</li>
               <li>Sistema pronto para uso</li>
             </ol>
           </div>
